@@ -47,6 +47,16 @@
 
   .footer{text-align:center;color:#666;font-size:.9em;margin:18px 0 8px}
 
+
+  @media print {
+  body { background: white !important; padding: 0 !important; }
+  .topbar, .footer, button { display: none !important; }
+  .container { max-width: 100% !important; margin: 0 !important; }
+  .section { border: none !important; box-shadow: none !important; page-break-inside: avoid; }
+  details summary { font-weight: bold; }
+  a::after { content: " (" attr(href) ")"; font-size: 0.85em; }
+}
+
 </style>
 
 
@@ -762,7 +772,15 @@ function nextDay(){
   if(currentDay<days.length-1){ currentDay++; render(); window.scrollTo({top:0, behavior:"auto"}); }
 
 }
+function printCurrentLang() {
+  // Раскрыть все секции текущего языка, чтобы на печати был весь текст
+  document.querySelectorAll("#content details").forEach(d => d.open = true);
 
+  // Печатаем то, что сейчас показано (это и есть текущий язык)
+  setTimeout(() => window.print(), 100);
+}
+
+window.printCurrentLang = printCurrentLang;
 
 function render(){
 
@@ -859,6 +877,7 @@ window.addEventListener("DOMContentLoaded", render);
       <button id="prevBtn" onclick="prevDay()">← День</button>
 
       <button id="nextBtn" onclick="nextDay()">День →</button>
+      <button onclick="printCurrentLang()">🖨️ Печать</button>
 
     </div>
 
