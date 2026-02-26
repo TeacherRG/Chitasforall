@@ -47,6 +47,10 @@
 
   .footer{text-align:center;color:#666;font-size:.9em;margin:18px 0 8px}
 
+  .ml-word{cursor:pointer;border-radius:3px}
+  .ml-word:hover{background:#f0f4ff}
+  .ml-active{background:#ffe066;border-radius:3px;padding:0 1px}
+
 </style>
 
 
@@ -762,6 +766,8 @@ function nextDay(){
 
 function render(){
 
+  mlStop();
+
   const d = days[currentDay];
 
   document.getElementById("title").innerText = d.title[currentLang] || d.title.ru;
@@ -827,6 +833,130 @@ function collapseAll(){
 
 window.addEventListener("DOMContentLoaded", render);
 
+/* ====== LISTEN MEGILLA ====== */
+let mlWords = [];
+let mlIdx = 0;
+let mlTimer = null;
+let mlRunning = false;
+let mlPaused = false;
+let mlAudioCtx = null;
+let mlAnalyser = null;
+let mlMicStream = null;
+let mlNoiseTimer = null;
+
+const ML_MS = Math.round(60000 / 250); // 240 ms per word at 250 wpm
+const ML_NOISE_THRESHOLD = 0.025;
+
+function mlWrapWords() {
+  mlWords = [];
+  const content = document.getElementById('content');
+  if (!content) return;
+  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, null, false);
+  const nodes = [];
+  let n;
+  while ((n = walker.nextNode())) {
+    if (n.textContent.trim()) nodes.push(n);
+  }
+  nodes.forEach(tn => {
+    const p = tn.parentNode;
+    if (!p || p.tagName === 'SCRIPT' || p.tagName === 'STYLE') return;
+    const parts = tn.textContent.split(/(\s+)/);
+    const frag = document.createDocumentFragment();
+    parts.forEach(part => {
+      if (/\S/.test(part)) {
+        const sp = document.createElement('span');
+        sp.className = 'ml-word';
+        sp.textContent = part;
+        sp.addEventListener('click', function(e) {
+          if (mlRunning) { e.stopPropagation(); mlJumpTo(mlWords.indexOf(sp)); }
+        });
+        frag.appendChild(sp);
+        mlWords.push(sp);
+      } else {
+        frag.appendChild(document.createTextNode(part));
+      }
+    });
+    p.replaceChild(frag, tn);
+  });
+}
+
+function mlJumpTo(idx) {
+  if (idx < 0 || idx >= mlWords.length) return;
+  if (mlIdx >= 0 && mlIdx < mlWords.length && mlWords[mlIdx]) mlWords[mlIdx].classList.remove('ml-active');
+  mlIdx = idx;
+  mlWords[mlIdx].classList.add('ml-active');
+  mlWords[mlIdx].scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+function mlStep() {
+  if (mlPaused) return;
+  if (mlIdx > 0 && mlWords[mlIdx - 1]) mlWords[mlIdx - 1].classList.remove('ml-active');
+  if (mlIdx < mlWords.length) {
+    mlWords[mlIdx].classList.add('ml-active');
+    mlWords[mlIdx].scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    mlIdx++;
+  } else {
+    mlStop();
+  }
+}
+
+function mlCheckNoise() {
+  if (!mlAnalyser) return;
+  const buf = new Float32Array(mlAnalyser.fftSize);
+  mlAnalyser.getFloatTimeDomainData(buf);
+  let rms = 0;
+  for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / buf.length);
+  const btn = document.getElementById('listenBtn');
+  if (rms > ML_NOISE_THRESHOLD) {
+    if (!mlPaused) {
+      mlPaused = true;
+      if (btn) btn.textContent = '🔇 Пауза';
+    }
+  } else {
+    if (mlPaused) {
+      mlPaused = false;
+      if (btn) btn.textContent = '⏹ Стоп';
+    }
+  }
+}
+
+function mlStop() {
+  mlRunning = false;
+  mlPaused = false;
+  if (mlTimer) { clearInterval(mlTimer); mlTimer = null; }
+  if (mlNoiseTimer) { clearInterval(mlNoiseTimer); mlNoiseTimer = null; }
+  if (mlMicStream) { mlMicStream.getTracks().forEach(t => t.stop()); mlMicStream = null; }
+  if (mlAudioCtx) { mlAudioCtx.close().catch(function(){}); mlAudioCtx = null; mlAnalyser = null; }
+  mlWords.forEach(function(w) { w.classList.remove('ml-active'); });
+  const btn = document.getElementById('listenBtn');
+  if (btn) btn.textContent = '🔊 Слушать';
+}
+
+async function listenMegilla() {
+  if (mlRunning) { mlStop(); return; }
+  document.querySelectorAll('#content details').forEach(function(d) { d.open = true; });
+  mlWrapWords();
+  if (mlWords.length === 0) return;
+  mlIdx = 0;
+  mlRunning = true;
+  mlPaused = false;
+  const btn = document.getElementById('listenBtn');
+  if (btn) btn.textContent = '⏹ Стоп';
+  mlTimer = setInterval(mlStep, ML_MS);
+  try {
+    mlMicStream = await navigator.mediaDevices.getUserMedia({audio: true, video: false});
+    mlAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = mlAudioCtx.createMediaStreamSource(mlMicStream);
+    mlAnalyser = mlAudioCtx.createAnalyser();
+    mlAnalyser.fftSize = 256;
+    src.connect(mlAnalyser);
+    mlNoiseTimer = setInterval(mlCheckNoise, 150);
+  } catch(e) {
+    console.warn('Microphone unavailable:', e);
+  }
+}
+
 </script>
 
 </head>
@@ -855,6 +985,8 @@ window.addEventListener("DOMContentLoaded", render);
       <button id="prevBtn" onclick="prevDay()">← День</button>
 
       <button id="nextBtn" onclick="nextDay()">День →</button>
+
+      <button id="listenBtn" onclick="listenMegilla()">🔊 Слушать</button>
 
     </div>
 
